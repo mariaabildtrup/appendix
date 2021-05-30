@@ -1,0 +1,361 @@
+---
+title: "plots"
+author: "Maria Abildtrup Madsen"
+date: "10/4/2021"
+output: html_document
+---
+
+# Setting up 
+```{r}
+library(pacman)
+p_load(dplyr, visNetwork, scales, tibble, tidyr, tidytext)
+
+# datasets
+distances_df <- readRDS("output_data/df_distances.rds")
+#df_tracking <- readRDS("output_data/df_tracking.rds")
+df_tracking <- readRDS("../data//df_tracking.rds")
+df_event <- readRDS("output_data/df_event.rds")
+features <- readRDS("output_data/features_final.rds")
+players <- read.csv("output_data/players.csv", sep=",")
+df_angle_phase_pair <- readRDS("output_data/df_angle_phase_pair.rds")
+df_cor_phase_pair <- readRDS("output_data/df_cor_phase_pair.rds")
+  
+df_tracking_join <- df_tracking %>%  
+  distinct(matchId, half, time, phase_id) 
+
+players <- players %>%  
+  rename(PlayerID = ID)
+
+df_tracking <- df_tracking %>%
+  left_join(players, by="playerId") %>%  
+  mutate(PlayerID = ifelse(contestantId != "9qsmopgutr7ut5g6workk8w4i", "", PlayerID))
+
+phase_id_input <- 27907
+
+temp <- df_tracking %>%
+  inner_join(players, by="playerId") %>%  
+  filter(phase_id==phase_id_input, contestantId == "9qsmopgutr7ut5g6workk8w4i") %>% 
+  dplyr::select(playerId, shirtNumber) %>% 
+  mutate(shirtNumber=as.character(shirtNumber))
+```
+
+
+# Network plot passings
+```{r}
+df_pass <- df_event %>%
+  filter(typeId == 1) %>%  
+  filter(contestantId =="9qsmopgutr7ut5g6workk8w4i") %>% 
+  mutate(match_half = paste0(matchId, "_", periodId)) %>% 
+  dplyr::select(playerId, id, match_half, outcome)
+
+#turnover variable 
+df_pass <- df_pass %>% 
+  mutate(turn_over = ifelse(lag(outcome)==0, 1, 0)) %>% 
+  mutate(turn_over = ifelse(is.na(turn_over), 0, turn_over))
+
+subset <- subset(df_pass, match_half=="b3bwclqs6al1i00yvd6c9evze_1")
+  
+size <- subset %>% 
+  group_by(label=playerId) %>% 
+  summarize(size=n()) %>% 
+  mutate(label=as.character(label))
+
+passings <- data.frame(paste(subset$playerId, collapse = " "))
+names(passings)[1] <- "pass"
+
+passings <- passings %>% 
+  unnest_tokens(bigram, pass, token = "ngrams", n = 2) %>% 
+  separate(bigram, c("player1", "player2"), sep = " ") %>% 
+  rowid_to_column("id") 
+
+passings <- passings %>% 
+  left_join(df_pass, by="id") %>% 
+  dplyr::select(player1, player2, turn_over) 
+
+passings$turn_over <- passings$turn_over %>% 
+  replace_na(0)
+
+# Remove passings before a turnover
+turns <- list()
+for (i in 1:nrow(passings)){
+  turn = ifelse(passings$turn_over[i+1]==1, 1, 0)
+  turns <- append(turns, turn)
+}
+
+passings$after_turnover <- turns
+
+passings <- passings %>% 
+  filter(after_turnover==0) %>% 
+  filter(player1!=player2) %>% 
+  count(player1, player2, sort = TRUE) %>% 
+  rename(weight=n)
+
+players <- passings %>% 
+  dplyr::select(player1, player2) %>% 
+  t %>% c %>% unique %>% 
+  data.frame() 
+
+# Create sources dataset
+sources <- passings %>% 
+  distinct(player1) %>% 
+  rename(label=player1)
+
+# Create destinations dataset 
+destinations <- passings %>% 
+  distinct(player2) %>% 
+  rename(label=player2)
+
+# Create nodes dataset
+nodes <- full_join(sources, destinations, by="label") %>% 
+  rowid_to_column("id") %>% 
+  left_join(size, by='label')
+
+# Create edges dataset
+edges <- passings %>% 
+  left_join(nodes, by=c("player1"="label")) %>% 
+  rename(from=id)
+
+edges <- edges %>% 
+  left_join(nodes, by=c("player2"="label")) %>% 
+  rename(to=id) %>% 
+  mutate(width=weight) %>% 
+  dplyr::select(from, to, width)
+
+nodes <- nodes %>% 
+  inner_join(players, by=c("label"="playerId")) %>% 
+  dplyr::select(id, label=ID, size) %>%  
+  distinct()
+
+visNetwork(nodes, edges) %>% 
+#  visIgraphLayout(layout = "layout_in_circle") %>% 
+#  visEdges(arrows='to') %>% 
+  visIgraphLayout(layout = "layout_with_fr") %>% 
+  visOptions(highlightNearest = list(enabled =TRUE, degree = 1))  
+  #  visNodes(size=rrp_usd)
+```
+
+
+
+# Network plot speed
+```{r}
+df_cor_pair <- df_cor_phase_pair %>% 
+  filter(phase_id == phase_id_input)
+
+sources <- df_cor_pair %>% 
+  distinct(source=shirtNumber1) %>% 
+  rename(label=source)
+
+# Create destinations dataset 
+destinations <- df_cor_pair %>% 
+  distinct(destination = shirtNumber2) %>% 
+  rename(label=destination)
+
+# Create nodes dataset
+nodes <- full_join(sources, destinations, by="label") %>% 
+  rowid_to_column("id") # %>% 
+#  left_join(player_dist, by=c('label'='shirtNumber')) %>% 
+#  mutate(size=rescale(-meanDistance, to=c(0,50)))
+
+# Create edges df_angle_pair
+edges <- df_cor_pair %>% 
+  left_join(nodes, by=c("shirtNumber1"="label")) %>% 
+  rename(from=id)
+
+edges <- edges %>% 
+  left_join(nodes, by=c("shirtNumber2"="label")) %>% 
+  rename(to=id) %>% 
+  mutate(width=cor*7) %>%
+  mutate(width=replace_na(width, 0)) %>%  
+  dplyr::select(from, to, width)
+
+
+nodes <- nodes %>% 
+  inner_join(temp, by=c("label"="shirtNumber")) %>% 
+  inner_join(players, by="playerId") %>%  
+  dplyr::select(id, label=ID) %>%  
+  distinct()
+
+
+
+visNetwork(nodes, edges) %>% 
+#  visEdges(arrows='to') %>% 
+  visIgraphLayout(layout = "layout_in_circle") %>% 
+  #visIgraphLayout(layout = "layout_with_fr") %>% 
+  visOptions(highlightNearest = list(enabled =TRUE, degree = 1)) 
+  #visInteraction(navigationButtons = TRUE)
+```
+
+
+# Network plot direction
+```{r}
+df_angle_pair <- df_angle_phase_pair %>% 
+  filter(phase_id == phase_id_input)
+
+sources <- df_angle_pair %>% 
+  distinct(source=shirtNumber1) %>% 
+  rename(label=source)
+
+# Create destinations dataset 
+destinations <- df_angle_pair %>% 
+  distinct(destination = shirtNumber2) %>% 
+  rename(label=destination)
+
+# Create nodes dataset
+nodes <- full_join(sources, destinations, by="label") %>% 
+  rowid_to_column("id") # %>% 
+#  left_join(player_dist, by=c('label'='shirtNumber')) %>% 
+#  mutate(size=rescale(-meanDistance, to=c(0,50)))
+
+# Create edges df_angle_pair
+edges <- df_angle_pair %>% 
+  left_join(nodes, by=c("shirtNumber1"="label")) %>% 
+  rename(from=id)
+
+edges <- edges %>% 
+  left_join(nodes, by=c("shirtNumber2"="label")) %>% 
+  rename(to=id) %>% 
+  mutate(width=cor*6) %>%
+  mutate(width=replace_na(width, 0)) %>%  
+  dplyr::select(from, to, width)
+
+
+nodes <- nodes %>% 
+  inner_join(temp, by=c("label"="shirtNumber")) %>% 
+  inner_join(players, by="playerId") %>%  
+  dplyr::select(id, label=ID) %>%  
+  distinct()
+
+visNetwork(nodes, edges) %>% 
+#  visEdges(arrows='to') %>% 
+  visIgraphLayout(layout = "layout_in_circle") %>% 
+  #visIgraphLayout(layout = "layout_with_fr") %>% 
+  visOptions(highlightNearest = list(enabled =TRUE, degree = 1)) 
+  #visInteraction(navigationButtons = TRUE)
+```
+
+# Network plot position
+```{r}
+
+#rm(df_tracking)
+
+
+#-----BIG DIFFERENCE----#
+
+gc()
+
+subset <- distances_df %>% 
+  left_join(df_tracking_join, by=c("matchId", "half", "time")) %>% 
+  distinct() 
+
+subset <- subset %>% 
+  filter(phase_id==phase_id_input) 
+
+# Mean pairwise distance
+mean_dist_players <- subset %>%  
+  group_by(shirtNumber1, shirtNumber2) %>% 
+  summarize(meanDistance = mean(dist), sdDistance = sd(dist)) %>% 
+  mutate(meanDistance=round(meanDistance, 2), sdDistance=round(sdDistance, 2)) %>% 
+  ungroup() 
+
+# Mean individual distance 
+temp1 <- subset %>% 
+  dplyr::select(shirtNumber=shirtNumber1, dist)
+
+temp2 <- subset %>% 
+  dplyr::select(shirtNumber=shirtNumber2, dist)
+
+player_dist <- rbind(temp1, temp2)
+
+player_dist <- player_dist %>% 
+  group_by(shirtNumber) %>% 
+  summarize(meanDistance = mean(dist), sdDistance = sd(dist)) %>% 
+  mutate(meanDistance=round(meanDistance, 2), sdDistance=round(sdDistance, 2)) %>% 
+  mutate(shirtNumber=as.character(shirtNumber)) %>% 
+  ungroup()
+
+mean_dist_players$n <- rescale(-mean_dist_players$meanDistance, to = c(1, 100)) 
+
+mean_dist_players <- mean_dist_players %>% 
+  mutate(source=as.character(shirtNumber1), destination=as.character(shirtNumber2)) %>% 
+  dplyr::select(source, destination, n)
+
+# Create sources dataset
+sources <- mean_dist_players %>% 
+  distinct(source) %>% 
+  rename(label=source)
+
+# Create destinations dataset 
+destinations <- mean_dist_players %>% 
+  distinct(destination) %>% 
+  rename(label=destination)
+
+# Create nodes dataset
+nodes <- full_join(sources, destinations, by="label") %>% 
+  rowid_to_column("id") %>% 
+  left_join(player_dist, by=c('label'='shirtNumber')) %>% 
+  mutate(size=rescale(-meanDistance, to=c(0,50)))
+
+# Create edges dataset
+edges <- mean_dist_players %>% 
+  left_join(nodes, by=c("source"="label")) %>% 
+  rename(from=id)
+
+edges <- edges %>% 
+  left_join(nodes, by=c("destination"="label")) %>% 
+  rename(to=id) %>% 
+  mutate(width=n/15) %>% 
+  dplyr::select(from, to, width)
+
+#nodes$label <- ""# Node label
+nodes <- nodes %>% 
+  inner_join(temp, by=c("label"="shirtNumber")) %>% 
+  inner_join(players, by="playerId") %>%  
+  dplyr::select(id, label=ID, size) %>%  
+  distinct()
+
+visNetwork(nodes, edges, main = "Mean distance between players (pairwise)", submain="Size of nodes = mean individual distance to all other players (big = small distance, small=big difference)") %>% 
+#  visEdges(arrows='to') %>% 
+  visIgraphLayout(layout = "layout_in_circle") %>% 
+  #visIgraphLayout(layout = "layout_with_fr") %>% 
+  visOptions(highlightNearest = list(enabled =TRUE, degree = 1)) %>% 
+  visNodes(size="size") #%>% 
+  #visInteraction(navigationButtons = TRUE)
+```
+
+# Plot players on pitch
+```{r}
+source('../source_files/addPitchCH.R')
+
+temp <- df_tracking %>% 
+  filter(phase_id==phase_id_input) %>%   
+  slice_max(time, n=1) %>% 
+  dplyr::select(ID, x=xBall, y=yBall, time, contestantId) %>% 
+  mutate(ID="Ball") %>% 
+  mutate(ID=as.factor(ID))
+
+data_plot <- df_tracking %>% 
+  filter(phase_id==phase_id_input) %>%   
+  slice_max(time, n=1) %>% 
+  dplyr::select(ID, x, y, time, contestantId) %>% 
+  mutate(ID=as.factor(ID))
+
+data_plot <- rbind(data_plot, temp) %>% 
+  mutate(ball = ifelse(ID=="Ball", "Ball", 
+                       ifelse(contestantId=="9qsmopgutr7ut5g6workk8w4i", "BIF player", "Opponent"))) %>% 
+  mutate(ball=as.factor(ball))
+
+p <- ggplot(
+  data_plot, 
+  aes(x = x, y=y, group = ID, label = ID, color=ball)
+) +
+  addPitchCH()+ 
+  geom_point(show.legend = FALSE, alpha = 0.7, size=8) +
+  scale_colour_manual(values = c("grey30", "#bb9a0e", "coral4")) +
+  geom_text(color="black") + 
+  labs(x = "x coordinate", y = "y coordinate") +
+  theme(legend.title = element_blank())
+
+p
+```
+
+
