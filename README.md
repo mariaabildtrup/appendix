@@ -9,6 +9,6 @@ Due to the anonymity of the data received from Brøndby IF, data will not be ava
 
 # Files
 
-1. Code folder: contains all code that is used in the analysis 
-2. Output files: contains output tables and figures that are used in the paper 
-3. Animations: contains .git animations that are used as context for understanding the results of the analysis 
+1. `Code` folder: contains all code that is used in the analysis 
+2. `Data` folder: contains the features dataset
+3. `animation_plots` folder: contains .git animations that are used as context for understanding the results of the analysis 
