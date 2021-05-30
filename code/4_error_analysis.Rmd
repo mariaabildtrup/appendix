@@ -1,0 +1,298 @@
+---
+title: "4_error_analysis"
+output: html_document
+---
+
+# Setting up
+```{r}
+library(pacman)
+p_load(dplyr, kableExtra, ggplot2, tidyr, plotly)
+
+df_tracking <- readRDS("../output_data/df_tracking_0705.rds")
+df_event <- readRDS("../../Maria_thesis/data/df_event.rds")
+features <- readRDS("../output_data/features_final_1105.rds")
+predictions_df <- readRDS("../predictions_df.rds")
+
+players <- read.csv("../output_data/players.csv")
+
+df_tracking <- df_tracking %>% 
+  left_join(players, by="playerId") 
+
+df_tracking <- df_tracking %>% 
+  mutate(PlayerID = ifelse(contestantId != "9qsmopgutr7ut5g6workk8w4i", shirtNumber, ID))
+
+dir <- df_tracking %>% 
+  filter(contestantId=="9qsmopgutr7ut5g6workk8w4i") %>% 
+  distinct(phase_id, direction)
+
+predictions_df <- predictions_df %>%
+  left_join(dir, by="phase_id") %>%  
+  mutate(ball_start_x=ball_start_x*direction)  
+
+predictions_df <- predictions_df %>%
+  mutate(pred_error = pred-perf_score) %>%  
+  mutate(abs_pred_error = abs(pred-perf_score))
+
+predictions_df <- predictions_df %>%
+  mutate(pred_error_group = ifelse(abs_pred_error < 5, "Very low prediction error", 
+                                   ifelse(abs_pred_error >= 5 & abs_pred_error <10, "Low prediction error", 
+                                          ifelse(abs_pred_error >= 10 & abs_pred_error < 20, "Medium prediction error",
+                                                 ifelse(abs_pred_error >= 20 & abs_pred_error < 50, "High prediction error",
+                                                        ifelse(abs_pred_error >=50, "Very high prediction error", ""))))))
+
+predictions_df <- predictions_df %>%
+  mutate(segment_start = ifelse(ball_start_x<=1750, "Defence", 
+                                ifelse(ball_start_x>1750 & ball_start_x<3500, "Midfield", 
+                                       "Offense")))
+
+match_overview <- df_event %>%  
+  distinct(matchId, match, season)
+```
+
+# Plot mean alignment speed
+```{r}
+library(tidyverse)
+library(ggrepel)
+library(plotly)
+
+dat_32901 <- df_tracking %>% 
+  filter(phase_id == 32901) %>% 
+  filter(contestantId == "9qsmopgutr7ut5g6workk8w4i") %>% 
+  mutate(Player = as.factor(ID)) %>%  
+  mutate(label = ifelse(sec==38, PlayerID, NA)) 
+
+dat_32901 %>% 
+  ggplot(aes(x=sec, y=speed, color=Player)) +
+  geom_line(size=.7, alpha=.8) +
+  theme_minimal()
+
+dat_32901_filtered <- dat_32901 %>% 
+  mutate(color=ifelse(Player != "Player AB" & Player != "Player AK" & Player != "Player L" & Player != "Player G", "Other players", ID))  %>%  
+  mutate(color=as.factor(color))
+
+p <- dat_32901_filtered %>% 
+  ggplot(aes(x=sec, y=speed, group=Player)) +
+  geom_line(size=.7, alpha=.8, aes(color=color)) +
+  theme_minimal() + scale_color_manual( values=c("lightgrey", "blue", "forestgreen", "orange", "red"))
+  
+p
+```
+
+# Creating summary datasets
+```{r}
+summarized_segments <- predictions_df %>%  
+  group_by(segment_start, offense_defense) %>% 
+  dplyr::summarize(mean_abs = mean(abs_pred_error), sd_abs = sd(abs_pred_error), mean_pred = mean(pred_error), sd_pred = sd(pred_error)) 
+
+predictions_df %>%  
+  group_by(pred_error_group) %>%  
+  dplyr::summarize(n=n()) %>% 
+  kbl()
+
+df_summarized <- predictions_df %>%  
+  group_by(pred_error_group) %>%  
+  summarize_at(vars(maxSpeed:maxSpeedBall), mean, na.rm=T) 
+
+df_summarized_matchId <- predictions_df %>%  
+  group_by(matchId) %>%  
+  dplyr::summarize(mean_pred=mean(abs_pred_error), sd_pred=sd(abs_pred_error)) %>%  
+  left_join(match_overview, by="matchId") %>% 
+  arrange(season)
+
+df_summarized_matchId <- df_summarized_matchId[, c(4:5,2:3)]
+
+write.csv(df_summarized_matchId, "df_summarized_matchId.csv") # For appendix
+
+df_offensive <- predictions_df %>% 
+  filter(segment_start=="Offense") %>% 
+#  filter(offense_defense ==0) %>%  
+  mutate(y_end_abs = abs(ball_end_y), y_start_abs = abs(ball_start_y)) %>% 
+  mutate(y_change = abs(ball_end_y-ball_start_y)) %>% 
+  mutate(max_y = pmax(y_end_abs, y_start_abs))
+  
+
+lm1 <- lm(abs_pred_error ~ ball_end_y, data = df_offensive)
+summary(lm1)
+# p-value: 0.3263
+# estimate = 1.407e-03
+
+lm2 <- lm(abs_pred_error ~ y_end_abs, data = df_offensive)
+summary(lm2)
+# p-value: 0.0005154
+
+lm3 <- lm(abs_pred_error ~ ball_start_y, data = df_offensive)
+summary(lm3)
+# p-value: 0.7724
+
+lm4 <- lm(abs_pred_error ~ y_start_abs, data = df_offensive)
+summary(lm4)
+# p-value: 7.277e-07
+# Estimate  = 0.001986 
+
+lm5 <- lm(abs_pred_error ~ y_change, data = df_offensive)
+summary(lm5)
+# p-value: 0.0002008
+# Estimate  = -0.0012384 
+
+lm6 <- lm(abs_pred_error ~ max_y, data = df_offensive)
+summary(lm6)
+
+df_offensive %>%  
+#  filter(abs_pred_error>20) %>%  
+  ggplot(aes(x=y_change, y=abs_pred_error)) +
+  geom_point(color="black", alpha=.8) +
+  theme_minimal() + 
+  geom_smooth(method = "lm")
+
+df_offensive %>%  
+  filter(abs_pred_error>20) %>%  
+  ggplot(aes(x=y_change, y=abs_pred_error)) +
+  geom_point()
+```
+
+# Compactness during defence (not possession) and offensive (possession) 
+```{r}
+p_load(tidyr)
+
+df_compactness_off_def <- predictions_df %>% 
+  select(phase_id, offense_defense, chull_area) 
+  
+df_compactness_off_def <- df_compactness_off_def %>%  
+  spread(offense_defense, chull_area)
+
+mean(df_compactness_off_def$`0`, na.rm=T)
+sd(df_compactness_off_def$`0`, na.rm=T)
+
+mean(df_compactness_off_def$`1`, na.rm=T)
+sd(df_compactness_off_def$`1`, na.rm=T)
+
+t.test(df_compactness_off_def$`0`, df_compactness_off_def$`1`, na.rm=T)
+```
+
+# Zorniger vs Frederiksen
+```{r}
+df_zorniger_fred <- predictions_df %>% 
+  left_join(match_overview, by="matchId") %>%  
+  select(phase_id, season, abs_pred_error) %>% 
+  mutate(coach=ifelse(season=="Season 2018/2019", "Zorniger", "Frederiksen"))
+  
+df_zorniger_fred <- df_zorniger_fred %>%  
+  spread(coach, abs_pred_error)
+
+mean(df_zorniger_fred$Frederiksen, na.rm=T)
+sd(df_zorniger_fred$Frederiksen, na.rm=T)
+
+mean(df_zorniger_fred$Zorniger, na.rm=T)
+sd(df_zorniger_fred$Zorniger, na.rm=T)
+
+t.test(df_zorniger_fred$Frederiksen, df_zorniger_fred$Zorniger, na.rm=T)
+```
+
+# Compactness during defence on offensive vs defensive segment 
+```{r}
+df_compactness <- predictions_df %>% 
+  select(phase_id, segment_start, chull_area) 
+  
+df_compactness <- df_compactness %>%  
+  spread(segment_start, chull_area)
+
+mean(df_compactness$Defence, na.rm=T)
+sd(df_compactness$Defence, na.rm=T)
+
+mean(df_compactness$Offense, na.rm=T)
+sd(df_compactness$Offense, na.rm=T)
+
+t.test(df_compactness$Defence, df_compactness$Offense, method="pearson")
+```
+
+# Sequence length
+```{r}
+seq_len_dat <- df_tracking %>% 
+  group_by(phase_id) %>%  
+  summarize(len_seq=n())
+
+predictions_df <- predictions_df %>% 
+  left_join(seq_len_dat, by="phase_id") 
+
+lm_len_seq <- lm(abs_pred_error ~ len_seq, data = predictions_df)
+summary(lm_len_seq)
+
+predictions_df %>%  
+  ggplot(aes(x=abs_pred_error, y=len_seq)) +
+  geom_point(alpha=.6, color="darkblue") +
+  theme_minimal()
+```
+
+# Aggregating each segment 
+```{r}
+features <- features %>% 
+  left_join(dir, by="phase_id")
+
+features <- features %>% 
+  mutate(ball_start_x = ball_start_x*direction)
+
+features <- features %>% 
+    mutate(segment_start = ifelse(ball_start_x<=1750, "Defence", 
+                                ifelse(ball_start_x>1750 & ball_start_x<3500, "Midfield", 
+                                       "Offense"))) 
+
+segment_agg_mean <- features %>%  
+  group_by(segment_start) %>% 
+  summarise_if(is.numeric, mean, na.rm = TRUE)
+
+segment_agg_sd <- features %>%  
+  group_by(segment_start) %>% 
+  summarise_if(is.numeric, sd, na.rm = TRUE)
+
+segment_agg_sd <- features %>%  
+  group_by(segment_start) %>% 
+  summarise_if(is.numeric, sd, na.rm = TRUE)
+
+segment_off_agg_sd <- features %>%  
+  group_by(segment_start, offense_defense) %>% 
+  summarise_if(is.numeric, sd, na.rm = TRUE)
+
+write.csv(segment_agg_mean, "segment_agg_mean.csv")
+write.csv(segment_agg_sd, "segment_agg_sd.csv")
+```
+
+# Unpredictiveness ~ Performance 
+```{r}
+df_off_seg_pos <- predictions_df %>% 
+  filter(offense_defense==1) %>%  
+  filter(segment_start=="Offense")
+
+lm_pred_off <- lm(perf_score ~ abs_pred_error, data = df_off_seg_pos)
+summary(lm_pred_off)
+
+p1 <- df_off_seg_pos %>%  
+  rename(`Performance score` = perf_score) %>% 
+  rename(`Absolute prediction error`= abs_pred_error) %>% 
+#  filter(perf_score>=60) %>% 
+  ggplot(aes(x=`Absolute prediction error`, y=`Performance score`)) +
+  geom_point(alpha=.4, color="darkblue") +
+  geom_smooth(method="lm") + 
+  theme_minimal()
+
+ggplotly(p1)
+
+df_def_seg_def <- predictions_df %>% 
+  filter(offense_defense==0) %>%  
+  filter(segment_start=="Defence")
+
+lm_pred_def <- lm(perf_score ~ abs_pred_error, data = df_def_seg_def)
+summary(lm_pred_def)
+
+p2 <- df_def_seg_def %>%  
+  rename(`Performance score` = perf_score) %>% 
+  rename(`Absolute prediction error`= abs_pred_error) %>% 
+#  filter(perf_score>=60) %>% 
+  ggplot(aes(x=`Absolute prediction error`, y=`Performance score`)) +
+  geom_point(alpha=.4, color="darkblue") +
+  geom_smooth(method="lm") + 
+  scale_y_continuous(limits=c(1, 90)) +
+  theme_minimal()
+
+ggplotly(p2)
+```
+
