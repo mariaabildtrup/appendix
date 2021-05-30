@@ -5,7 +5,7 @@ Master's thesis - code appendix
 This thesus suggests an alternative way of assessing collective behaviour by focusing on teams sports. The analysis looks at movement patterns from a team of football players (from Brøndby IF) across matches in three seasons, and investigates the effect of leadership, compactness, and coordination on team performance.
 
 # Anonymity 
-Due to the anonymity of the data received from Brøndby IF, data will not be availabe in this repository. 
+Due to the anonymity of the data received from Brøndby IF, the raw tracking data and event data will not be availabe in this repository. 
 
 # Files
 
