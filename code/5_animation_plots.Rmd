@@ -1,0 +1,179 @@
+---
+title: "Animation plots"
+output: html_document
+---
+
+```{r prep}
+library(pacman)
+p_load(dplyr, ggplot2, gganimate)
+
+df_tracking <- readRDS("output_data/df_tracking_0705.rds")
+df_event <- readRDS("../Maria_thesis/data/df_event.rds")
+df_event <- df_event %>% 
+  distinct(matchId, match, season, date)
+
+features <- readRDS("output_data/features_final_1105.rds")
+predictions_df <- readRDS("predictions_df.rds")
+
+predictions_df <- predictions_df %>%
+  mutate(pred_error = pred-perf_score) %>%  
+  mutate(abs_pred_error = abs(pred-perf_score))
+
+players <- read.csv("output_data/players.csv")
+
+df_tracking <- df_tracking %>% 
+#  dplyr::select(-ID) %>% 
+  left_join(players, by="playerId") %>%  
+  rename(PlayerID = ID) %>%  
+  mutate(PlayerID = ifelse(is.na(PlayerID), "O", PlayerID)) %>%  
+  mutate(PlayerID = ifelse(contestantId != "9qsmopgutr7ut5g6workk8w4i", shirtNumber, PlayerID))
+
+predictions_df <- predictions_df %>%
+  mutate(pred_error_group = ifelse(abs_pred_error < 5, "Very low prediction error", 
+                                   ifelse(abs_pred_error >= 5 & abs_pred_error <10, "Low prediction error", 
+                                          ifelse(abs_pred_error >= 10 & abs_pred_error < 20, "Medium prediction error",
+                                                 ifelse(abs_pred_error >= 20 & abs_pred_error < 50, "High prediction error",
+                                                        ifelse(abs_pred_error >=50, "Very high prediction error", ""))))))
+
+predictions_df <- predictions_df %>%
+  mutate(segment_start = ifelse(ball_start_x<=1750, "Defence", 
+                                ifelse(ball_start_x>1750 & ball_start_x<3500, "Midfield", 
+                                       "Offense")))
+```
+
+# Animation plots  
+
+## Highest performance value - defence
+```{r}
+phase_id_input <- 3430
+source("source/animation_func.R")
+animated_p
+anim_save("high_performance_defence_3430.gif")
+```
+
+## High performance value - offense
+```{r}
+phase_id_input <- 28578
+source("source/animation_func.R")
+animated_p
+anim_save("high_performance_offense_28578.gif")
+```
+
+
+## Low performance value - defence
+```{r}
+phase_id_input <- 9480
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("Low_perf_def", phase_id_input, ".gif"))
+```
+
+## Low performance value - offense
+```{r}
+phase_id_input <- 45587
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("Low_perf_def", phase_id_input, ".gif"))
+```
+
+
+## Lowest value dist x
+```{r}
+phase_id_input <- 10650
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("lowest_val_dist_x_", phase_id_input, ".gif"))
+```
+
+
+## Highest value dist x
+```{r}
+phase_id_input <- 6658
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("highest_val_dist_x_", phase_id_input, ".gif"))
+```
+
+
+## Lowest value dist y
+```{r}
+phase_id_input <- 4001
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("lowest_val_dist_y_", phase_id_input, ".gif"))
+```
+
+## Highest value dist y
+```{r}
+phase_id_input <- 9631
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("highest_val_dist_y_", phase_id_input, ".gif"))
+```
+
+## Highest value of convex hull
+```{r}
+phase_id_input <- 1291	
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("high_convex_hull", phase_id_input, ".gif"))
+```
+
+## Lowest value of convex hull
+```{r}
+phase_id_input <- 18392
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("low_convex_hull", phase_id_input, ".gif"))
+animated_p
+```
+
+## High value of convex hull in defence (performance score = 7.74)
+```{r}
+phase_id_input <- 8172
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("high_convex_hull_defence", phase_id_input, ".gif"))
+```
+
+## High negative prediction error (-63.33)
+```{r}
+phase_id_input <- 39404
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("high_neg_pred_error", phase_id_input, ".gif"))
+```
+
+## High positive prediction error (76.49)
+```{r}
+phase_id_input <- 6983
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("high_pos_pred_error", phase_id_input, ".gif"))
+```
+
+## Smallest prediction error in offensive segment (0.00788325)
+```{r}
+phase_id_input <- 32901
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("low_abs_pred_error_off_segment", phase_id_input, ".gif"))
+```
+
+## Biggest prediction error in offensive segment (76.49228)
+```{r}
+phase_id_input <- 33006
+source("source/animation_func.R")
+animated_p
+anim_save(paste0("high_abs_pred_error_off_segment", phase_id_input, ".gif"))
+```
+
+
+## EXPLORATIVE
+```{r}
+phase_id_input <- 17890
+source("source/animation_func.R")
+animated_p
+anim_save("standard_situation_2.gif")
+```
+
